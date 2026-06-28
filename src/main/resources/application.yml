@@ -1,0 +1,48 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: bizdevar-backend
+
+  datasource:
+    # XAMPP MySQL default: user "root" with empty password on port 3306.
+    # createDatabaseIfNotExist=true avtomatik olaraq "bizdevar" bazasini yaradir.
+    url: jdbc:mysql://localhost:3306/bizdevar?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+      continue-on-error: false
+      encoding: UTF-8
+
+  jackson:
+    default-property-inclusion: non_null
+
+bizdevar:
+  jwt:
+    secret: ${JWT_SECRET:bizdevar-dev-secret-change-in-production-please-use-a-long-random-value}
+    ttl-days: 7
+  cookie:
+    name: bizdevar_token
+    secure: false
+    same-site: Lax
+  cors:
+    origins: ${CORS_ORIGINS:http://localhost,http://127.0.0.1,http://localhost:80,http://127.0.0.1:80,http://localhost:5500,http://127.0.0.1:5500}
+  google:
+    # Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID
+    # ONEMLI: Client ID-ni Console-dan "copy" duymesi ile kopyala (1 herf sehv olsa giris isleme).
+    # Frontend meta[name=google-client-id] ile EYNI deyer olmalidir.
+    client-id: ${GOOGLE_CLIENT_ID:1049420869484-89qvsir9m5g6rsbso973paccdel74kgq.apps.googleusercontent.com}
+    # client-secret ID token yoxlamasi ucun teleb olunmur, amma saxlamaq olar.
+    client-secret: ${GOOGLE_CLIENT_SECRET:}
+
+logging:
+  level:
+    org.springframework.jdbc.core: info
+    com.bizdevar: info

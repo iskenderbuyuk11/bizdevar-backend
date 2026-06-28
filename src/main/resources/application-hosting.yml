@@ -1,0 +1,60 @@
+# =============================================================================
+# BizdeVar — HOSTING / PRODUCTION (cPanel MySQL)
+# =============================================================================
+# Istifade:
+#   java -jar bizdevar.jar --spring.profiles.active=hosting
+#   ve ya: SPRING_PROFILES_ACTIVE=hosting
+# =============================================================================
+
+server:
+  port: ${PORT:${SERVER_PORT:8080}}
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: bizdevar-backend
+
+  datasource:
+    # Render/VPS-den cPanel MySQL: DB_HOST = cPanel Remote MySQL hostname
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:cmzxbzhgdt_bizdevar}?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USER:cmzxbzhgdt_bizdevar}
+    password: ${DB_PASSWORD:isgender2008}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  sql:
+    init:
+      mode: ${SQL_INIT_MODE:always}
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+      continue-on-error: false
+      encoding: UTF-8
+
+  jackson:
+    default-property-inclusion: non_null
+
+bizdevar:
+  jwt:
+    secret: ${JWT_SECRET:bizdevar-hosting-jwt-change-this-to-long-random-string}
+    ttl-days: 7
+
+  cookie:
+    name: bizdevar_token
+    secure: ${COOKIE_SECURE:true}
+    same-site: Lax
+
+  cors:
+    origins:
+      - https://bizdevar.az
+      - https://www.bizdevar.az
+      - http://bizdevar.az
+      - http://www.bizdevar.az
+
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:1049420869484-89qvsir9m5g6rsbso973paccdel74kgq.apps.googleusercontent.com}
+    client-secret: ${GOOGLE_CLIENT_SECRET:}
+
+logging:
+  level:
+    root: warn
+    org.springframework.jdbc.core: warn
+    com.bizdevar: info
