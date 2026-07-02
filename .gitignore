@@ -4,3 +4,9 @@ target/
 *.iml
 .vscode/
 .DS_Store
+
+# Xarici server sifreleri
+src/main/resources/application-external.yml
+deploy/application.yml
+deploy/application-external.yml
+deploy/bizdevar-backend.jar

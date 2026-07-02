@@ -1,0 +1,17 @@
+[Unit]
+Description=Buykon Backend API (Spring Boot)
+After=network.target mysql.service mariadb.service
+Wants=mysql.service mariadb.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /root/bizdevar-backend.jar --spring.config.location=file:/root/application.yml
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

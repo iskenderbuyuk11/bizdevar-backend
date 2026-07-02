@@ -51,14 +51,15 @@ public class ProductEngagementRepository {
 
     public List<Map<String, Object>> reviews(long productId) {
         return jdbc.query(
-                "SELECT r.id, r.stars, r.text, r.created_at, u.name AS user_name "
+                "SELECT r.id, r.stars, r.text, r.seller_reply, r.created_at, u.name AS user_name "
                         + "FROM product_reviews r JOIN users u ON u.id = r.user_id "
-                        + "WHERE r.product_id = ? ORDER BY r.created_at DESC",
+                        + "WHERE r.product_id = ? AND r.admin_status = 'approved' ORDER BY r.created_at DESC",
                 (rs, n) -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", rs.getLong("id"));
                     m.put("stars", rs.getInt("stars"));
                     m.put("text", rs.getString("text"));
+                    m.put("seller_reply", rs.getString("seller_reply"));
                     m.put("name", maskName(rs.getString("user_name")));
                     m.put("time", fmt(rs.getTimestamp("created_at")));
                     return m;
@@ -71,7 +72,7 @@ public class ProductEngagementRepository {
         return jdbc.query(
                 "SELECT q.id, q.question, q.answer, q.created_at, u.name AS user_name "
                         + "FROM product_questions q JOIN users u ON u.id = q.user_id "
-                        + "WHERE q.product_id = ? ORDER BY q.created_at DESC",
+                        + "WHERE q.product_id = ? AND q.status = 'published' ORDER BY q.created_at DESC",
                 (rs, n) -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", rs.getLong("id"));
@@ -106,8 +107,9 @@ public class ProductEngagementRepository {
         if (safeText.isBlank()) throw ApiException.badRequest("Rey metni bos ola bilmez");
 
         jdbc.update(
-                "INSERT INTO product_reviews (product_id, user_id, stars, text) VALUES (?, ?, ?, ?) "
-                        + "ON DUPLICATE KEY UPDATE stars = VALUES(stars), text = VALUES(text), updated_at = CURRENT_TIMESTAMP",
+                "INSERT INTO product_reviews (product_id, user_id, stars, text, admin_status) VALUES (?, ?, ?, ?, 'pending') "
+                        + "ON DUPLICATE KEY UPDATE stars = VALUES(stars), text = VALUES(text), "
+                        + "admin_status = 'pending', updated_at = CURRENT_TIMESTAMP",
                 productId,
                 userId,
                 safeStars,
@@ -123,7 +125,7 @@ public class ProductEngagementRepository {
         String safeText = text == null ? "" : text.trim();
         if (safeText.isBlank()) throw ApiException.badRequest("Sual bos ola bilmez");
         jdbc.update(
-                "INSERT INTO product_questions (product_id, user_id, question) VALUES (?, ?, ?)",
+                "INSERT INTO product_questions (product_id, user_id, question, status) VALUES (?, ?, ?, 'pending')",
                 productId,
                 userId,
                 safeText

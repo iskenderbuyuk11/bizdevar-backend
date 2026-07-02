@@ -41,6 +41,7 @@ public class CatalogRepository {
 
         if (activeOnly) {
             sql.append(" AND p.status = 'active'");
+            sql.append(" AND (v.status = 'active' OR v.id IS NULL)");
         }
         if (cat != null && !cat.isBlank() && !cat.equals("all")) {
             sql.append(" AND p.category_slug = ?");
@@ -62,7 +63,8 @@ public class CatalogRepository {
     public Map<String, Object> getProduct(long id) {
         List<Map<String, Object>> list = jdbc.query(
                 "SELECT " + ProductMapper.SELECT_COLUMNS
-                        + " FROM products p LEFT JOIN vendors v ON v.id = p.vendor_id WHERE p.id = ?",
+                        + " FROM products p LEFT JOIN vendors v ON v.id = p.vendor_id "
+                        + "WHERE p.id = ? AND p.status = 'active' AND (v.status = 'active' OR v.id IS NULL)",
                 ProductMapper.INSTANCE, id);
         if (list.isEmpty()) throw ApiException.notFound("Mehsul tapilmadi");
         return list.get(0);

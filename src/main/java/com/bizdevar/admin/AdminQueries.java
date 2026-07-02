@@ -1,5 +1,6 @@
 package com.bizdevar.admin;
 
+import com.bizdevar.common.Json;
 import com.bizdevar.order.OrderRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -60,14 +61,16 @@ public class AdminQueries {
             latest.add(row);
         }
 
-        int pendingVendors = count("SELECT COUNT(*) FROM vendors WHERE status IN ('pending','review','restricted')");
+        int pendingApplications = count("SELECT COUNT(*) FROM vendors WHERE status IN ('pending','review')");
+        int activeStores = count("SELECT COUNT(*) FROM vendors WHERE status='active'");
         int openTickets = count("SELECT COUNT(*) FROM support_tickets WHERE status IN ('new','in_progress')");
         int auditCnt = count("SELECT COUNT(*) FROM audit_logs");
         int couponCnt = count("SELECT COUNT(*) FROM coupons WHERE active = 1");
         int pendingTrx = count("SELECT COUNT(*) FROM transactions WHERE status = 'pending'");
 
         Map<String, Object> nav = new LinkedHashMap<>();
-        nav.put("vendors", pendingVendors);
+        nav.put("vendor-applications", pendingApplications);
+        nav.put("stores", activeStores);
         nav.put("products", pendingProducts);
         nav.put("orders", orderCount);
         nav.put("payments", pendingTrx);
@@ -190,63 +193,160 @@ public class AdminQueries {
         return Math.max(50, score);
     }
 
-    // ---------- Vendors ----------
-    public Map<String, Object> vendors() {
+    // ---------- Vendors / Stores ----------
+    public Map<String, Object> vendorApplications() {
         List<Map<String, Object>> list = jdbc.query(
-                "SELECT id, name, category, verification_status, revenue, rating, status FROM vendors ORDER BY revenue DESC",
-                (rs, n) -> {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("id", rs.getLong("id"));
-                    m.put("name", rs.getString("name"));
-                    m.put("category", rs.getString("category"));
-                    m.put("verification", verLabel(rs.getString("verification_status")));
-                    m.put("verification_type", verType(rs.getString("verification_status")));
-                    m.put("revenue", azn(rs.getDouble("revenue")));
-                    m.put("rating", String.format("%.1f", rs.getDouble("rating")));
-                    m.put("status", statusLabel(rs.getString("status")));
-                    m.put("status_type", statusType(rs.getString("status")));
-                    return m;
-                });
+                "SELECT id, name, category, verification_status, revenue, rating, status, created_at "
+                        + "FROM vendors WHERE status IN ('pending','review') ORDER BY id DESC",
+                this::mapVendorListRow);
 
-        int active = count("SELECT COUNT(*) FROM vendors WHERE status='active'");
-        int pending = count("SELECT COUNT(*) FROM vendors WHERE status IN ('pending','review')");
-        int restricted = count("SELECT COUNT(*) FROM vendors WHERE status='restricted'");
-        double avg = sum("SELECT COALESCE(AVG(rating),0) FROM vendors");
+        int pendingOnly = count("SELECT COUNT(*) FROM vendors WHERE status='pending'");
+        int review = count("SELECT COUNT(*) FROM vendors WHERE status='review'");
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("metrics", List.of(
-                metric("Aktiv satici", String.valueOf(active), "—", "up"),
-                metric("Yeni muraciet", String.valueOf(pending), "—", "up"),
-                metric("Mehdud magaza", String.valueOf(restricted), "—", "down"),
-                metric("Orta reytinq", String.format("%.2f", avg), "—", "up"),
-                metric("Cemi satici", String.valueOf(active + pending + restricted), "—", "up")
+                metric("Gozleyen muraciet", String.valueOf(pendingOnly), "—", "up"),
+                metric("Yoxlamada", String.valueOf(review), "—", "up"),
+                metric("Cemi sorğu", String.valueOf(list.size()), "—", "up")
         ));
-        out.put("vendors", list);
+        out.put("applications", list);
         return out;
+    }
+
+    public Map<String, Object> stores() {
+        List<Map<String, Object>> list = jdbc.query(
+                "SELECT id, name, category, verification_status, revenue, rating, status, created_at "
+                        + "FROM vendors WHERE status IN ('active','restricted') ORDER BY revenue DESC",
+                this::mapVendorListRow);
+
+        int active = count("SELECT COUNT(*) FROM vendors WHERE status='active'");
+        int restricted = count("SELECT COUNT(*) FROM vendors WHERE status='restricted'");
+        double avg = sum("SELECT COALESCE(AVG(rating),0) FROM vendors WHERE status='active'");
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("metrics", List.of(
+                metric("Aktiv magaza", String.valueOf(active), "—", "up"),
+                metric("Mehdud magaza", String.valueOf(restricted), "—", "down"),
+                metric("Orta reytinq", String.format("%.2f", avg), "—", "up")
+        ));
+        out.put("stores", list);
+        return out;
+    }
+
+    private Map<String, Object> mapVendorListRow(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", rs.getLong("id"));
+        m.put("name", rs.getString("name"));
+        m.put("category", rs.getString("category"));
+        m.put("verification", verLabel(rs.getString("verification_status")));
+        m.put("verification_type", verType(rs.getString("verification_status")));
+        m.put("revenue", azn(rs.getDouble("revenue")));
+        m.put("rating", String.format("%.1f", rs.getDouble("rating")));
+        String rawStatus = rs.getString("status");
+        m.put("raw_status", rawStatus);
+        m.put("status", statusLabel(rawStatus));
+        m.put("status_type", statusType(rawStatus));
+        java.sql.Timestamp created = rs.getTimestamp("created_at");
+        m.put("created_at", created != null ? formatTs(created) : "");
+        return m;
+    }
+
+    /** @deprecated admin panel stores() istifade edir */
+    public Map<String, Object> vendors() {
+        return stores();
     }
 
     public Map<String, Object> vendorDetail(long id) {
         List<Map<String, Object>> list = jdbc.query(
-                "SELECT id, name, category, verification_status, status, store_type, voen, phone, revenue, rating, rejection_reason "
-                        + "FROM vendors WHERE id = ?",
+                "SELECT v.id, v.seller_id, v.user_id, v.name, v.category, v.verification_status, v.status, "
+                        + "v.store_type, v.voen, v.phone, v.revenue, v.rating, v.rejection_reason, v.auto_named, v.created_at, "
+                        + "s.email AS seller_email, s.owner_name, s.owner_surname, s.phone AS seller_phone, "
+                        + "s.store_name AS seller_store_name, s.store_type AS seller_store_type, s.voen AS seller_voen, "
+                        + "s.verification_status AS seller_verification, s.status AS seller_status, "
+                        + "s.rejection_reason AS seller_rejection_reason, s.approved_at, s.rejected_at, s.created_at AS seller_created_at, "
+                        + "u.email AS user_email, u.name AS user_name, u.phone AS user_phone, "
+                        + "(SELECT COUNT(*) FROM products p WHERE p.vendor_id = v.id AND p.status != 'deleted') AS product_count "
+                        + "FROM vendors v "
+                        + "LEFT JOIN sellers s ON s.id = v.seller_id "
+                        + "LEFT JOIN users u ON u.id = v.user_id "
+                        + "WHERE v.id = ?",
                 (rs, n) -> {
+                    String status = rs.getString("status");
+                    String verification = rs.getString("verification_status");
+                    String storeType = rs.getString("store_type");
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", rs.getLong("id"));
+                    m.put("seller_id", rs.getObject("seller_id"));
                     m.put("name", rs.getString("name"));
                     m.put("category", rs.getString("category"));
-                    m.put("verification_status", rs.getString("verification_status"));
-                    m.put("status", rs.getString("status"));
-                    m.put("store_type", rs.getString("store_type"));
-                    m.put("voen", rs.getString("voen"));
-                    m.put("phone", rs.getString("phone"));
+                    m.put("verification_status", verification);
+                    m.put("verification_label", verLabel(verification));
+                    m.put("verification_type", verType(verification));
+                    m.put("status", status);
+                    m.put("status_label", statusLabel(status));
+                    m.put("status_type", statusType(status));
+                    m.put("store_type", storeType);
+                    m.put("store_type_label", storeTypeLabel(storeType));
+                    m.put("voen", nonEmpty(rs.getString("voen"), rs.getString("seller_voen")));
+                    m.put("phone", nonEmpty(rs.getString("phone"), rs.getString("seller_phone"), rs.getString("user_phone")));
                     m.put("revenue", rs.getDouble("revenue"));
-                    m.put("rating", rs.getDouble("rating"));
-                    m.put("rejection_reason", rs.getString("rejection_reason"));
+                    m.put("revenue_label", azn(rs.getDouble("revenue")));
+                    m.put("rating", String.format("%.1f", rs.getDouble("rating")));
+                    m.put("rejection_reason", nonEmpty(rs.getString("rejection_reason"), rs.getString("seller_rejection_reason")));
+                    m.put("auto_named", rs.getInt("auto_named") == 1);
+                    m.put("product_count", rs.getInt("product_count"));
+                    m.put("created_at", formatTs(rs.getTimestamp("created_at")));
+
+                    String ownerName = trim(rs.getString("owner_name"));
+                    String ownerSurname = trim(rs.getString("owner_surname"));
+                    String ownerFull = (ownerName + " " + ownerSurname).trim();
+                    if (ownerFull.isEmpty()) ownerFull = trim(rs.getString("user_name"));
+                    m.put("owner_name", ownerFull.isEmpty() ? "—" : ownerFull);
+
+                    String email = nonEmpty(rs.getString("seller_email"), rs.getString("user_email"));
+                    m.put("email", email.isEmpty() ? "—" : email);
+
+                    m.put("seller_status", rs.getString("seller_status"));
+                    m.put("seller_status_label", statusLabel(rs.getString("seller_status")));
+                    m.put("registered_at", formatTs(rs.getTimestamp("seller_created_at")));
+                    if (rs.getTimestamp("approved_at") != null) {
+                        m.put("approved_at", formatTs(rs.getTimestamp("approved_at")));
+                    }
+                    if (rs.getTimestamp("rejected_at") != null) {
+                        m.put("rejected_at", formatTs(rs.getTimestamp("rejected_at")));
+                    }
                     return m;
                 }, id);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("vendor", list.isEmpty() ? Map.of() : list.get(0));
         return out;
+    }
+
+    private static String trim(String s) {
+        return s == null ? "" : s.trim();
+    }
+
+    private static String nonEmpty(String... values) {
+        if (values == null) return "";
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v.trim();
+        }
+        return "";
+    }
+
+    private static String formatTs(java.sql.Timestamp ts) {
+        if (ts == null) return "";
+        return ts.toLocalDateTime().toString().replace("T", " ");
+    }
+
+    private static String storeTypeLabel(String type) {
+        if (type == null || type.isBlank()) return "—";
+        return switch (type) {
+            case "voenli" -> "VOEN ilə";
+            case "voensiz" -> "VOEN-siz";
+            case "online" -> "Onlayn mağaza";
+            default -> type;
+        };
     }
 
     // ---------- Products ----------
@@ -296,24 +396,79 @@ public class AdminQueries {
 
     public Map<String, Object> productDetail(long id) {
         List<Map<String, Object>> list = jdbc.query(
-                "SELECT p.id, p.name, p.category_slug, p.price, p.base_price, p.stock, p.status, p.description, "
-                        + "p.image_url, p.rejection_reason, p.deletion_reason, COALESCE(v.name,'—') AS vendor "
-                        + "FROM products p LEFT JOIN vendors v ON v.id = p.vendor_id WHERE p.id = ?",
+                "SELECT p.id, p.vendor_id, p.name, p.slug, p.category_slug, p.price, p.base_price, p.discount_percent, "
+                        + "p.stock, p.status, p.description, p.image_url, p.images_json, p.specs_json, "
+                        + "p.rejection_reason, p.deletion_reason, p.moderation_action, p.created_at, "
+                        + "COALESCE(v.name,'—') AS vendor, COALESCE(c.name, p.category_slug) AS category_name "
+                        + "FROM products p "
+                        + "LEFT JOIN vendors v ON v.id = p.vendor_id "
+                        + "LEFT JOIN categories c ON c.slug = p.category_slug "
+                        + "WHERE p.id = ?",
                 (rs, n) -> {
+                    String status = rs.getString("status");
+                    String action = rs.getString("moderation_action");
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", rs.getLong("id"));
+                    m.put("vendor_id", rs.getLong("vendor_id"));
                     m.put("name", rs.getString("name"));
+                    m.put("slug", rs.getString("slug"));
                     m.put("category_slug", rs.getString("category_slug"));
-                    m.put("price", rs.getDouble("price"));
-                    m.put("stock", rs.getInt("stock"));
-                    m.put("status", rs.getString("status"));
-                    m.put("description", rs.getString("description"));
-                    m.put("image_url", rs.getString("image_url"));
+                    m.put("category_name", rs.getString("category_name"));
                     m.put("vendor", rs.getString("vendor"));
+                    m.put("price", rs.getDouble("price"));
+                    m.put("price_label", azn(rs.getDouble("price")));
+                    double base = rs.getDouble("base_price");
+                    if (!rs.wasNull()) {
+                        m.put("base_price", base);
+                        m.put("base_price_label", azn(base));
+                    }
+                    int discount = rs.getInt("discount_percent");
+                    m.put("discount_percent", discount);
+                    m.put("stock", rs.getInt("stock"));
+                    m.put("status", status);
+                    m.put("status_label", productStatusLabel(status));
+                    m.put("status_type", productStatusType(status));
+                    m.put("moderation_action", action);
+                    m.put("moderation_label", moderationLabel(action));
+                    m.put("description", rs.getString("description"));
+                    String cover = rs.getString("image_url");
+                    m.put("image_url", cover);
+                    List<String> images = mergeImages(cover, Json.readStringList(rs.getString("images_json")));
+                    m.put("images", images);
+                    m.put("image_count", images.size());
+                    m.put("specs", Json.readStringMap(rs.getString("specs_json")));
+                    m.put("rejection_reason", rs.getString("rejection_reason"));
+                    m.put("deletion_reason", rs.getString("deletion_reason"));
+                    m.put("created_at", rs.getTimestamp("created_at") != null
+                            ? rs.getTimestamp("created_at").toLocalDateTime().toString().replace("T", " ")
+                            : "");
                     return m;
                 }, id);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("product", list.isEmpty() ? Map.of() : list.get(0));
+        return out;
+    }
+
+    private static String moderationLabel(String action) {
+        if (action == null || action.isBlank()) return "—";
+        return switch (action) {
+            case "create" -> "Yeni mehsul";
+            case "update" -> "Deyisiklik";
+            case "delete" -> "Silinme sorğusu";
+            default -> action;
+        };
+    }
+
+    private static List<String> mergeImages(String cover, List<String> extra) {
+        List<String> out = new ArrayList<>();
+        if (cover != null && !cover.isBlank()) out.add(cover.trim());
+        if (extra != null) {
+            for (String img : extra) {
+                if (img == null || img.isBlank()) continue;
+                String u = img.trim();
+                if (!out.contains(u)) out.add(u);
+            }
+        }
         return out;
     }
 
@@ -599,7 +754,7 @@ public class AdminQueries {
                     m.put("created_at", rs.getString("created_at"));
                     return m;
                 });
-        int admins = count("SELECT COUNT(*) FROM users WHERE is_admin=1");
+        int admins = count("SELECT COUNT(*) FROM admins");
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("metrics", List.of(
                 metric("Audit qeydi", String.valueOf(list.size()), "—", "up"),

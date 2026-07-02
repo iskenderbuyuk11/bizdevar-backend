@@ -137,25 +137,45 @@ public class SellerRepository {
     public long createProduct(long vendorId, Map<String, Object> req) {
         String name = str(req.get("name"));
         if (name.isBlank()) throw ApiException.badRequest("Mehsul adi teleb olunur");
-        String categorySlug = str(req.getOrDefault("category_slug", "diger"));
-        if (categorySlug.isBlank()) categorySlug = "diger";
-        double price = dbl(req.get("price"));
-        Double basePrice = req.get("base_price") == null ? null : dbl(req.get("base_price"));
-        int stock = (int) dbl(req.get("stock"));
-        String imageUrl = str(req.get("image_url"));
+        String categorySlug = str(req.get("category_slug"));
+        if (categorySlug.isBlank()) throw ApiException.badRequest("Kateqoriya secilmelidir");
         String description = str(req.get("description"));
+        if (description.isBlank()) throw ApiException.badRequest("Tesvir teleb olunur");
 
-        int discount = 0;
-        if (basePrice != null && basePrice > price && basePrice > 0) {
-            discount = (int) Math.round((basePrice - price) / basePrice * 100);
+        int stock = (int) dbl(req.get("stock"));
+        if (stock < 1) throw ApiException.badRequest("Stok sayi minimum 1 olmalidir");
+
+        List<String> images = readImages(req);
+        if (images.size() < 3) throw ApiException.badRequest("Minimum 3 sekil teleb olunur");
+        if (images.size() > 12) throw ApiException.badRequest("Maximum 12 sekil ola bilər");
+
+        int coverIndex = (int) dbl(req.get("cover_index"));
+        if (coverIndex < 0 || coverIndex >= images.size()) coverIndex = 0;
+        List<String> ordered = new ArrayList<>(images);
+        if (coverIndex > 0) {
+            String cover = ordered.remove(coverIndex);
+            ordered.add(0, cover);
         }
+        String imageUrl = ordered.get(0);
+
+        double basePrice = dbl(req.get("base_price"));
+        if (basePrice <= 0 && req.get("price") != null) {
+            basePrice = dbl(req.get("price"));
+        }
+        if (basePrice <= 0) throw ApiException.badRequest("Qiymet teleb olunur");
+
+        int discount = clampDiscount(req.get("discount_percent"));
+        double price = discount > 0
+                ? Math.round(basePrice * (100 - discount)) / 100.0
+                : basePrice;
+
         String slug = slugify(name) + "-" + System.currentTimeMillis();
 
         jdbc.update("INSERT INTO products (vendor_id, category_slug, name, slug, price, base_price, discount_percent, "
                         + "stock, image_url, images_json, specs_json, description, status, moderation_action) "
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, 'pending', 'create')",
                 vendorId, categorySlug, name, slug, price, basePrice, discount, stock, imageUrl,
-                imageUrl == null || imageUrl.isBlank() ? "[]" : Json.write(List.of(imageUrl)), description);
+                Json.write(ordered), description);
 
         return jdbc.queryForObject("SELECT id FROM products WHERE slug = ?", Long.class, slug);
     }
@@ -163,10 +183,71 @@ public class SellerRepository {
     public void updateProduct(long vendorId, long id, Map<String, Object> req) {
         Integer owns = jdbc.queryForObject("SELECT COUNT(*) FROM products WHERE id = ? AND vendor_id = ?", Integer.class, id, vendorId);
         if (owns == null || owns == 0) throw ApiException.badRequest("Mehsul tapilmadi");
-        jdbc.update("UPDATE products SET name = COALESCE(?, name), price = ?, stock = ?, description = ?, "
-                        + "image_url = ?, moderation_action = 'update', status = 'pending' WHERE id = ? AND vendor_id = ?",
-                str(req.get("name")), dbl(req.get("price")), (int) dbl(req.get("stock")),
-                str(req.get("description")), str(req.get("image_url")), id, vendorId);
+
+        List<String> images = readImages(req);
+        String imageUrl = str(req.get("image_url"));
+        String imagesJson = null;
+        if (!images.isEmpty()) {
+            if (images.size() < 3) throw ApiException.badRequest("Minimum 3 sekil teleb olunur");
+            if (images.size() > 12) throw ApiException.badRequest("Maximum 12 sekil ola bilər");
+            int coverIndex = (int) dbl(req.get("cover_index"));
+            if (coverIndex < 0 || coverIndex >= images.size()) coverIndex = 0;
+            List<String> ordered = new ArrayList<>(images);
+            if (coverIndex > 0) {
+                String cover = ordered.remove(coverIndex);
+                ordered.add(0, cover);
+            }
+            imageUrl = ordered.get(0);
+            imagesJson = Json.write(ordered);
+        }
+
+        double basePrice = dbl(req.get("base_price"));
+        if (basePrice <= 0 && req.get("price") != null) basePrice = dbl(req.get("price"));
+        int discount = clampDiscount(req.get("discount_percent"));
+        double price = basePrice > 0
+                ? (discount > 0 ? Math.round(basePrice * (100 - discount)) / 100.0 : basePrice)
+                : dbl(req.get("price"));
+
+        String categorySlug = str(req.get("category_slug"));
+
+        if (imagesJson != null) {
+            jdbc.update("UPDATE products SET name = ?, category_slug = COALESCE(NULLIF(?, ''), category_slug), "
+                            + "price = ?, base_price = ?, discount_percent = ?, stock = ?, description = ?, "
+                            + "image_url = ?, images_json = ?, moderation_action = 'update', status = 'pending' "
+                            + "WHERE id = ? AND vendor_id = ?",
+                    str(req.get("name")), categorySlug, price, basePrice > 0 ? basePrice : null, discount,
+                    (int) dbl(req.get("stock")), str(req.get("description")), imageUrl, imagesJson, id, vendorId);
+        } else {
+            jdbc.update("UPDATE products SET name = ?, category_slug = COALESCE(NULLIF(?, ''), category_slug), "
+                            + "price = ?, base_price = ?, discount_percent = ?, stock = ?, description = ?, "
+                            + "image_url = COALESCE(NULLIF(?, ''), image_url), moderation_action = 'update', status = 'pending' "
+                            + "WHERE id = ? AND vendor_id = ?",
+                    str(req.get("name")), categorySlug, price, basePrice > 0 ? basePrice : null, discount,
+                    (int) dbl(req.get("stock")), str(req.get("description")), imageUrl, id, vendorId);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> readImages(Map<String, Object> req) {
+        Object raw = req.get("images");
+        if (raw instanceof List<?> list) {
+            List<String> out = new ArrayList<>();
+            for (Object item : list) {
+                String s = str(item).trim();
+                if (!s.isBlank()) out.add(s);
+            }
+            return out;
+        }
+        String single = str(req.get("image_url")).trim();
+        if (!single.isBlank()) return List.of(single);
+        return List.of();
+    }
+
+    private static int clampDiscount(Object o) {
+        int d = (int) dbl(o);
+        if (d < 0) return 0;
+        if (d > 90) return 90;
+        return d;
     }
 
     public void requestDelete(long vendorId, long id, String reason) {

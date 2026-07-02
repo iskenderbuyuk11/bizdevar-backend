@@ -1,7 +1,12 @@
 package com.bizdevar.admin;
 
 import com.bizdevar.common.ApiException;
+import com.bizdevar.config.AppProperties;
+import com.bizdevar.mail.EmailService;
 import com.bizdevar.order.OrderRepository;
+import com.bizdevar.seller.SellerAccount;
+import com.bizdevar.seller.SellerAccountRepository;
+import com.bizdevar.seller.SellerEngagementRepository;
 import com.bizdevar.security.AuthSupport;
 import com.bizdevar.user.AppUser;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,11 +23,21 @@ public class AdminController {
     private final AdminQueries q;
     private final OrderRepository orders;
     private final JdbcTemplate jdbc;
+    private final SellerAccountRepository sellerAccounts;
+    private final SellerEngagementRepository sellerEngagement;
+    private final EmailService emailService;
+    private final AppProperties appProperties;
 
-    public AdminController(AdminQueries q, OrderRepository orders, JdbcTemplate jdbc) {
+    public AdminController(AdminQueries q, OrderRepository orders, JdbcTemplate jdbc,
+                           SellerAccountRepository sellerAccounts, SellerEngagementRepository sellerEngagement,
+                           EmailService emailService, AppProperties appProperties) {
         this.q = q;
         this.orders = orders;
         this.jdbc = jdbc;
+        this.sellerAccounts = sellerAccounts;
+        this.sellerEngagement = sellerEngagement;
+        this.emailService = emailService;
+        this.appProperties = appProperties;
     }
 
     // ---------- Read ----------
@@ -35,8 +50,14 @@ public class AdminController {
         return q.search(query);
     }
 
+    @GetMapping("/vendor-applications")
+    public Map<String, Object> vendorApplications(HttpServletRequest r) { guard(r); return q.vendorApplications(); }
+
+    @GetMapping("/stores")
+    public Map<String, Object> stores(HttpServletRequest r) { guard(r); return q.stores(); }
+
     @GetMapping("/vendors")
-    public Map<String, Object> vendors(HttpServletRequest r) { guard(r); return q.vendors(); }
+    public Map<String, Object> vendors(HttpServletRequest r) { guard(r); return q.stores(); }
 
     @GetMapping("/vendors/{id}")
     public Map<String, Object> vendorDetail(HttpServletRequest r, @PathVariable long id) { guard(r); return q.vendorDetail(id); }
@@ -108,7 +129,16 @@ public class AdminController {
     @PostMapping("/vendors/{id}/approve")
     public Map<String, Object> approveVendor(HttpServletRequest r, @PathVariable long id) {
         AppUser a = guard(r);
-        jdbc.update("UPDATE vendors SET verification_status='verified', status='active' WHERE id=?", id);
+        Long sellerId = null;
+        try {
+            sellerId = jdbc.queryForObject("SELECT seller_id FROM vendors WHERE id=?", Long.class, id);
+        } catch (Exception ignored) {}
+        if (sellerId != null) {
+            sellerAccounts.onApproved(sellerId);
+            sellerAccounts.findById(sellerId).ifPresent(s -> sendApprovalEmail(s));
+        } else {
+            jdbc.update("UPDATE vendors SET verification_status='verified', status='active' WHERE id=?", id);
+        }
         audit(a, r, "vendor_approve", "vendor:" + id);
         return ok();
     }
@@ -118,7 +148,15 @@ public class AdminController {
                                             @RequestBody(required = false) AdminActionRequest body) {
         AppUser a = guard(r);
         String reason = body != null && body.reason != null ? body.reason : "";
-        jdbc.update("UPDATE vendors SET status='restricted', rejection_reason=? WHERE id=?", reason, id);
+        Long sellerId = null;
+        try {
+            sellerId = jdbc.queryForObject("SELECT seller_id FROM vendors WHERE id=?", Long.class, id);
+        } catch (Exception ignored) {}
+        if (sellerId != null) {
+            sellerAccounts.onRejected(sellerId, reason);
+        } else {
+            jdbc.update("UPDATE vendors SET status='restricted', rejection_reason=? WHERE id=?", reason, id);
+        }
         audit(a, r, "vendor_reject", "vendor:" + id);
         return ok();
     }
@@ -239,9 +277,45 @@ public class AdminController {
         return ok();
     }
 
+    @GetMapping("/reviews/pending")
+    public Map<String, Object> pendingReviews(HttpServletRequest r) {
+        guard(r);
+        return Map.of("reviews", sellerEngagement.listPendingReviewsForAdmin());
+    }
+
+    @PostMapping("/reviews/{id}/approve")
+    public Map<String, Object> approveReview(HttpServletRequest r, @PathVariable long id) {
+        AppUser a = guard(r);
+        sellerEngagement.moderateReview(id, "approved");
+        audit(a, r, "review_approve", "review:" + id);
+        return ok();
+    }
+
+    @PostMapping("/reviews/{id}/reject")
+    public Map<String, Object> rejectReview(HttpServletRequest r, @PathVariable long id) {
+        AppUser a = guard(r);
+        sellerEngagement.moderateReview(id, "rejected");
+        audit(a, r, "review_reject", "review:" + id);
+        return ok();
+    }
+
     // ---------- helpers ----------
     private AppUser guard(HttpServletRequest r) {
-        return AuthSupport.requireAdmin(r);
+        return AuthSupport.requireAdminLegacy(r);
+    }
+
+    private void sendApprovalEmail(SellerAccount s) {
+        if (s.storeCode == null || s.storeCode.isBlank()) {
+            sellerAccounts.backfillStoreIdentity(s.id, s.storeName, s.ownerName, s.ownerSurname);
+            s = sellerAccounts.findById(s.id).orElse(s);
+        }
+        String ownerName = ((s.ownerName == null ? "" : s.ownerName.trim()) + " "
+                + (s.ownerSurname == null ? "" : s.ownerSurname.trim())).trim();
+        if (ownerName.isBlank()) ownerName = s.storeName;
+        String base = appProperties.getFrontendUrl();
+        if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+        String loginUrl = base + "/sellerpanel/login.html";
+        emailService.sendSellerApproved(s.email, s.storeCode, ownerName, loginUrl);
     }
 
     private Map<String, Object> ok() {

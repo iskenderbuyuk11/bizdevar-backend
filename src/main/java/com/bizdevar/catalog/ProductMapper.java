@@ -19,7 +19,7 @@ public class ProductMapper implements RowMapper<Map<String, Object>> {
     public static final String SELECT_COLUMNS =
             "p.id, p.name, p.category_slug, p.slug, p.price, p.base_price, p.discount_percent, "
                     + "p.popular, p.stock, p.image_url, p.description, p.specs_json, p.images_json, p.status, "
-                    + "COALESCE(v.name, 'BizdeVar Resmi') AS vendor_name, "
+                    + "COALESCE(v.name, 'BizdeVar Resmi') AS vendor_name, v.logo_url AS vendor_logo_url, "
                     + "(SELECT COALESCE(SUM(oi.qty), 0) FROM order_items oi WHERE oi.product_id = p.id) AS sold_count, "
                     + "(SELECT COALESCE(ROUND(AVG(pr.stars), 1), 0) FROM product_reviews pr WHERE pr.product_id = p.id) AS rating_stars, "
                     + "(SELECT COUNT(*) FROM product_reviews pr WHERE pr.product_id = p.id) AS rating_count";
@@ -63,6 +63,11 @@ public class ProductMapper implements RowMapper<Map<String, Object>> {
         p.put("stock", rs.getInt("stock"));
         p.put("status", rs.getString("status"));
         p.put("vendor_name", rs.getString("vendor_name"));
+        try {
+            String logo = rs.getString("vendor_logo_url");
+            if (logo != null && !logo.isBlank()) p.put("vendor_logo_url", logo);
+        } catch (java.sql.SQLException ignored) {
+        }
         p.put("sold_count", rs.getInt("sold_count"));
         p.put("rating_stars", rs.getDouble("rating_stars"));
         p.put("rating_count", rs.getInt("rating_count"));

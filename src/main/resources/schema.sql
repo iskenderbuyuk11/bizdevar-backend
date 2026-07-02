@@ -15,6 +15,29 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE KEY uq_users_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS admins (
+    id            BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    email         VARCHAR(255) NOT NULL,
+    name          VARCHAR(255) NOT NULL DEFAULT '',
+    password_hash VARCHAR(255) NULL,
+    is_active     TINYINT      NOT NULL DEFAULT 1,
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_admins_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admin_otps (
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    admin_id    BIGINT NOT NULL,
+    code_hash   VARCHAR(255) NOT NULL,
+    purpose     VARCHAR(20)  NOT NULL DEFAULT 'login',
+    verified_at DATETIME NULL,
+    expires_at  DATETIME NOT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_admin_otps_admin (admin_id),
+    KEY idx_admin_otps_expires (expires_at),
+    CONSTRAINT fk_admin_otps_admin FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS categories (
     id         BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     slug       VARCHAR(120) NOT NULL,
@@ -26,6 +49,7 @@ CREATE TABLE IF NOT EXISTS categories (
 
 CREATE TABLE IF NOT EXISTS vendors (
     id                  BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    seller_id           BIGINT NULL,
     user_id             BIGINT NULL,
     name                VARCHAR(255) NOT NULL,
     category            VARCHAR(120) NOT NULL DEFAULT '',
@@ -38,7 +62,8 @@ CREATE TABLE IF NOT EXISTS vendors (
     auto_named          TINYINT      NOT NULL DEFAULT 0,
     revenue             DOUBLE       NOT NULL DEFAULT 0,
     rating              DOUBLE       NOT NULL DEFAULT 0,
-    created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_vendors_seller (seller_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS products (
@@ -209,3 +234,114 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_trx_id (trx_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- Buykon: musteriler ve saticilar ayri cedvellerde (eyni email mumkundur)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS customers (
+    id            BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name          VARCHAR(255) NOT NULL,
+    email         VARCHAR(255) NOT NULL,
+    phone         VARCHAR(40)  NOT NULL DEFAULT '',
+    password_hash VARCHAR(255) NOT NULL DEFAULT '',
+    google_id     VARCHAR(255) NULL,
+    avatar_url    VARCHAR(512) NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_customers_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS sellers (
+    id                  BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    email               VARCHAR(255) NOT NULL,
+    phone               VARCHAR(40)  NOT NULL DEFAULT '',
+    password_hash       VARCHAR(255) NOT NULL,
+    owner_name          VARCHAR(120) NOT NULL DEFAULT '',
+    owner_surname       VARCHAR(120) NOT NULL DEFAULT '',
+    store_name          VARCHAR(255) NOT NULL,
+    category            VARCHAR(120) NOT NULL DEFAULT '',
+    store_type          VARCHAR(40)  NOT NULL DEFAULT 'voensiz',
+    voen                VARCHAR(40)  NOT NULL DEFAULT '',
+    verification_status VARCHAR(40)  NOT NULL DEFAULT 'pending',
+    status              VARCHAR(40)  NOT NULL DEFAULT 'pending',
+    rejection_reason    VARCHAR(512) NOT NULL DEFAULT '',
+    rejected_at         TIMESTAMP    NULL DEFAULT NULL,
+    approved_at         TIMESTAMP    NULL DEFAULT NULL,
+    auto_named          TINYINT      NOT NULL DEFAULT 0,
+    revenue             DOUBLE       NOT NULL DEFAULT 0,
+    rating              DOUBLE       NOT NULL DEFAULT 0,
+    created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sellers_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS seller_staff (
+    id         BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    seller_id  BIGINT NOT NULL,
+    email      VARCHAR(255) NOT NULL,
+    name       VARCHAR(255) NOT NULL DEFAULT '',
+    role       VARCHAR(40)  NOT NULL DEFAULT 'staff',
+    status     VARCHAR(40)  NOT NULL DEFAULT 'invited',
+    invited_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    joined_at  TIMESTAMP    NULL DEFAULT NULL,
+    KEY idx_seller_staff_seller (seller_id),
+    UNIQUE KEY uq_seller_staff_email (seller_id, email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS seller_notifications (
+    id         BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    seller_id  BIGINT NOT NULL,
+    title      VARCHAR(255) NOT NULL,
+    body       TEXT NOT NULL,
+    level      VARCHAR(40)  NOT NULL DEFAULT 'info',
+    is_read    TINYINT      NOT NULL DEFAULT 0,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_seller_notif_seller (seller_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_complaints (
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    seller_id   BIGINT NOT NULL,
+    product_id  BIGINT NULL,
+    customer_id BIGINT NULL,
+    subject     VARCHAR(255) NOT NULL,
+    body        TEXT NOT NULL,
+    status      VARCHAR(40)  NOT NULL DEFAULT 'open',
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_complaints_seller (seller_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS home_stories (
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    title       VARCHAR(120) NOT NULL DEFAULT '',
+    image_url   VARCHAR(512) NOT NULL,
+    link_url    VARCHAR(512) NOT NULL DEFAULT '',
+    sort_order  INT NOT NULL DEFAULT 0,
+    is_active   TINYINT NOT NULL DEFAULT 1,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_home_stories_active (is_active, sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- Köhnə bazalar: CREATE IF NOT EXISTS movcud cedvelleri yenilemir
+-- =============================================================================
+
+SET @bk_db = DATABASE();
+
+SET @bk_col = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @bk_db AND TABLE_NAME = 'vendors' AND COLUMN_NAME = 'seller_id');
+SET @bk_sql = IF(@bk_col = 0,
+    'ALTER TABLE vendors ADD COLUMN seller_id BIGINT NULL AFTER id',
+    'SELECT 1');
+PREPARE bk_stmt FROM @bk_sql;
+EXECUTE bk_stmt;
+DEALLOCATE PREPARE bk_stmt;
+
+SET @bk_idx = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = @bk_db AND TABLE_NAME = 'vendors' AND INDEX_NAME = 'idx_vendors_seller');
+SET @bk_sql = IF(@bk_idx = 0,
+    'ALTER TABLE vendors ADD KEY idx_vendors_seller (seller_id)',
+    'SELECT 1');
+PREPARE bk_stmt FROM @bk_sql;
+EXECUTE bk_stmt;
+DEALLOCATE PREPARE bk_stmt;

@@ -1,0 +1,41 @@
+BUYKON SERVER — QURAŞDIRMA
+==========================
+
+XETA SEBEBI (sizin hal):
+  java -jar bizdevar-backend.jar   ← YALNIZ JAR, application.yml YOXDUR
+  → default: root / bizdevar (lokal dev)
+  → serverde root girisi yoxdur → XETA
+
+HƏLL — 2 FAYL LAZIMDIR:
+  /root/bizdevar-backend.jar
+  /root/application.yml        ← BU FAYLI MUTLƏQ YÜKLƏYİN
+
+ADDIMLAR
+--------
+
+1) Faylları /root/ qovluğuna yükləyin:
+   - bizdevar-backend.jar
+   - application.yml
+   - start.sh
+   - setup-mysql.sql
+   - schema.sql
+   - data.sql
+
+2) MySQL quraşdırın:
+   sudo mysql < setup-mysql.sql
+
+3) Cədvəlləri yaradın:
+   mysql -u buykon -p'isgender2008A1A2**' buykondb < schema.sql
+   mysql -u buykon -p'isgender2008A1A2**' buykondb < data.sql
+
+4) İşə salın (DÜZGÜN ÜSUL):
+   chmod +x start.sh
+   ./start.sh
+
+   VƏ YA:
+   java -jar bizdevar-backend.jar --spring.config.location=file:/root/application.yml
+
+5) Yoxlama:
+   curl http://localhost:8080/api/health
+
+Qeyd: application.yml olmadan JAR işləməz — buykon/buykondb konfiqurasiyası oradadır.

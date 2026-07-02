@@ -2,7 +2,11 @@ package com.bizdevar.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
@@ -11,6 +15,19 @@ public class WebConfig implements WebMvcConfigurer {
 
     public WebConfig(AppProperties props) {
         this.props = props;
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        Path base = Paths.get(System.getProperty("user.dir"));
+        if (base.getFileName() != null && "backend".equalsIgnoreCase(base.getFileName().toString())) {
+            base = base.getParent();
+        }
+        Path uploads = base.resolve("uploads");
+        registry.addResourceHandler("/uploads/**")
+                .addResourceLocations(uploads.toUri().toString().endsWith("/")
+                        ? uploads.toUri().toString()
+                        : uploads.toUri().toString() + "/");
     }
 
     @Override
